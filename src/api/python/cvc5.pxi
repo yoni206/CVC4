@@ -1183,6 +1183,7 @@ cdef class Solver:
                 Term defineFun(Term fun, List[Term] bound_vars,
                                Term term, bool glbl)
         '''
+        print("panda 1")
         cdef Term term = Term(self)
         cdef vector[c_Term] v
         for bv in bound_vars:
