@@ -15,7 +15,7 @@ import pytest
 import pycvc5
 import sys
 
-from pycvc5 import kinds
+from pycvc5 import kinds, Term
 
 
 @pytest.fixture
@@ -2185,7 +2185,7 @@ def test_mk_const_array(solver):
 #   truen = solver.mkBoolean(true)
 #   start = solver.mkVar(boolean)
 #   output2
-#   g = solver.mkSygusGrammar([], start)
+#   g = solver.mkSygusGrammar([], [start])
 #   conj2 = solver.mkTerm(GT, x, zero)
 #   g.addRule(start, truen)
 #   # Call the abduction api, while the resulting abduct is the output
@@ -2347,53 +2347,53 @@ def test_mk_const_array(solver):
 # 
 # 
 # 
-# def test_synthFun(solver):
-#   null = solver.getNullSort()
-#   boolean = solver.getBooleanSort()
-#   integer = solver.getIntegerSort()
-# 
-#   nullTerm
-#   x = solver.mkVar(boolean)
-# 
-#   start1 = solver.mkVar(boolean)
-#   start2 = solver.mkVar(integer)
-# 
-#   g1 = solver.mkSygusGrammar(x, start1)
-#   g1.addRule(start1, solver.mkBoolean(false))
-# 
-#   g2 = solver.mkSygusGrammar(x, start2)
-#   g2.addRule(start2, solver.mkInteger(0))
-# 
-#   solver.synthFun("", [], boolean)
-#   solver.synthFun("f1", x, boolean)
-#   solver.synthFun("f2", x, boolean, g1)
-# 
-#   with pytest.raises(RuntimeError):
-#       solver.synthFun("f3", nullTerm, boolean)
-#   with pytest.raises(RuntimeError):
-#       solver.synthFun("f4", [], null)
-#   with pytest.raises(RuntimeError):
-#       solver.synthFun("f6", x, boolean, g2)
-#   slv = pycvc5.Solver()
-#   x2 = slv.mkVar(slv.getBooleanSort())
-#   slv.synthFun("f1", x2, slv.getBooleanSort())
-#   with pytest.raises(RuntimeError):
-#       slv.synthFun("", [], solver.getBooleanSort())
-#   with pytest.raises(RuntimeError):
-#       slv.synthFun("f1", x, solver.getBooleanSort())
-# 
-# 
-# 
+def test_synthFun(solver):
+  null = solver.getNullSort()
+  boolean = solver.getBooleanSort()
+  integer = solver.getIntegerSort()
+
+  nullTerm = Term(solver)
+  x = solver.mkVar(boolean)
+
+  start1 = solver.mkVar(boolean)
+  start2 = solver.mkVar(integer)
+
+  g1 = solver.mkSygusGrammar([x], [start1])
+  g1.addRule(start1, solver.mkBoolean(False))
+
+  g2 = solver.mkSygusGrammar([x], [start2])
+  g2.addRule(start2, solver.mkInteger(0))
+
+  solver.synthFun("", [], boolean)
+  solver.synthFun("f1", [x], boolean)
+  solver.synthFun("f2", [x], boolean, g1)
+
+  with pytest.raises(RuntimeError):
+      solver.synthFun("f3", [nullTerm], boolean)
+  with pytest.raises(RuntimeError):
+      solver.synthFun("f4", [], null)
+  with pytest.raises(RuntimeError):
+      solver.synthFun("f6", [x], boolean, g2)
+  slv = pycvc5.Solver()
+  x2 = slv.mkVar(slv.getBooleanSort())
+  slv.synthFun("f1", [x2], slv.getBooleanSort())
+  with pytest.raises(RuntimeError):
+      slv.synthFun("", [], solver.getBooleanSort())
+  with pytest.raises(RuntimeError):
+      slv.synthFun("f1", [x], solver.getBooleanSort())
+
+
+
 # def test_tupleProject(solver):
 #   sorts = [solver.getBooleanSort(),
 #                              solver.getIntegerSort(),
 #                              solver.getStringSort(),
 #                              solver.mkSetSort(solver.getStringSort())]
 #   elements = [
-#       solver.mkBoolean(true),
+#       solver.mkBoolean(True),
 #       solver.mkInteger(3),
 #       solver.mkString("C"),
-#       solver.mkTerm(SINGLETON, solver.mkString("Z"))]
+#       solver.mkTerm(kinds.Singleton, solver.mkString("Z"))]
 # 
 #   tuple = solver.mkTuple(sorts, elements)
 # 
@@ -2404,19 +2404,19 @@ def test_mk_const_array(solver):
 #   indices5 = [4]
 #   indices6 = [0, 4]
 # 
-#   solver.mkTerm(solver.mkOp(TUPLE_PROJECT, indices1), tuple)
-#   solver.mkTerm(solver.mkOp(TUPLE_PROJECT, indices2), tuple)
-#   solver.mkTerm(solver.mkOp(TUPLE_PROJECT, indices3), tuple)
-#   solver.mkTerm(solver.mkOp(TUPLE_PROJECT, indices4), tuple)
+#   solver.mkTerm(solver.mkOp(kinds.TupleProject, indices1), tuple)
+#   solver.mkTerm(solver.mkOp(kinds.TupleProject, indices2), tuple)
+#   solver.mkTerm(solver.mkOp(kinds.TupleProject, indices3), tuple)
+#   solver.mkTerm(solver.mkOp(kinds.TupleProject, indices4), tuple)
 # 
 #   with pytest.raises(RuntimeError):
-#       solver.mkTerm(solver.mkOp(TUPLE_PROJECT, indices5), tuple)
+#       solver.mkTerm(solver.mkOp(kinds.TupleProject, indices5), tuple)
 #   with pytest.raises(RuntimeError):
-#       solver.mkTerm(solver.mkOp(TUPLE_PROJECT, indices6), tuple)
+#       solver.mkTerm(solver.mkOp(kinds.TupleProject, indices6), tuple)
 # 
 #   indices = [0, 3, 2, 0, 1, 2]
 # 
-#   op = solver.mkOp(TUPLE_PROJECT, indices)
+#   op = solver.mkOp(kinds.TupleProject, indices)
 #   projection = solver.mkTerm(op, tuple)
 # 
 #   datatype = tuple.getSort().getDatatype()
