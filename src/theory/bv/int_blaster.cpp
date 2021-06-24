@@ -16,6 +16,7 @@
 #include "theory/bv/int_blaster.h"
 
 #include <cmath>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -26,6 +27,7 @@
 #include "options/option_exception.h"
 #include "options/uf_options.h"
 #include "theory/rewriter.h"
+#include "util/bitvector.h"
 #include "util/iand.h"
 #include "util/rational.h"
 
@@ -201,10 +203,157 @@ Node IntBlaster::translateNoChildren(Node original,
                                      std::vector<Node>& lemmas,
                                      std::map<Node, Node>& skolems)
 {
-  return Node();
+  Trace("int-blaster-debug")
+      << "translating leaf: " << original << "; of type: " << original.getType()
+      << std::endl;
+  // The translation of `original` to integers.
+  // This will be the returned Node of the function
+  Node translation;
+  Assert(original.isVar() || original.isConst());
+  if (original.isVar())
+  {
+    if (original.getType().isBitVector())
+    {
+      // For bit-vector variables, we create fresh integer variables
+      // or introduce bv2nat terms.
+      if (original.getKind() == kind::BOUND_VARIABLE)
+      {
+        // For bound variables we always generate an integer bound variable.
+        // Range constraints for the bound integer variables are not added now.
+        // they will be added once the quantifier itself is handled.
+        std::stringstream ss;
+        ss << original;
+        translation = d_nm->mkBoundVar(ss.str() + "_int", d_nm->integerType());
+      }
+      else
+      {
+        // original is a bit-vector variable (symbolic constant).
+        // Either we translate it to a fresh integer variable,
+        // or we translate it to (bv2nat original).
+        // In the former case, we must include range lemmas, while in the
+        // latter we don't need to.
+        // This is determined by the option bv-to-int-fresh-vars.
+        // intCast and bvCast are used for models:
+        // even if we introduce a fresh variable,
+        // it is associated with intCast (which is (bv2nat original)).
+        // bvCast is either ( (_ nat2bv k) original) or just original.
+        Node intCast = castToType(original, d_nm->integerType());
+        Node bvCast;
+        if (d_introduceFreshIntVars)
+        {
+          // we introduce a fresh variable, add range constraints, and save the
+          // connection between original and the new variable.
+          translation = d_nm->getSkolemManager()->mkPurifySkolem(
+              intCast,
+              "__intblast__var",
+              "Variable introduced in intblasting"
+              "pass instead of original variable "
+                  + original.toString());
+          uint64_t bvsize = original.getType().getBitVectorSize();
+          addRangeConstraint(translation, bvsize, lemmas);
+          // put new definition of old variable in skolems
+          bvCast = defineBVUFAsIntUF(original, translation);
+        }
+        else
+        {
+          // we just translate original to (bv2nat original)
+          translation = intCast;
+          // no need to do any casting back to bit-vector in tis case.
+          bvCast = original;
+        }
+
+        // add bvCast to skolems if it is not already ther.
+        if (skolems.find(original) == skolems.end())
+        {
+          skolems[original] = bvCast;
+        }
+        else
+        {
+          Assert(skolems[original] == bvCast);
+        }
+      }
+    }
+    else if (original.getType().isFunction())
+    {
+      translation = translateFunctionSymbol(original, skolems);
+    }
+    else
+    {
+      // variables other than bit-vector variables and function symbols
+      // are left intact
+      translation = original;
+    }
+  }
+  else
+  {
+    // original is a const
+    if (original.getKind() == kind::CONST_BITVECTOR)
+    {
+      // Bit-vector constants are transformed into their integer value.
+      BitVector constant(original.getConst<BitVector>());
+      Integer c = constant.toInteger();
+      translation = d_nm->mkConst<Rational>(c);
+    }
+    else
+    {
+      // Other constants stay the same.
+      translation = original;
+    }
+  }
+  return translation;
 }
 
-Node IntBlaster::defineBVUFAsIntUF(Node bvUF, Node intUF) { return Node(); }
+Node IntBlaster::defineBVUFAsIntUF(Node bvUF, Node intUF)
+{
+  NodeManager* nm = NodeManager::currentNM();
+  // The resulting term
+  Node result;
+  // The type of the resulting term
+  TypeNode resultType;
+  // symbolic arguments of original function
+  std::vector<Node> args;
+  if (!bvUF.getType().isFunction())
+  {
+    // bvUF is a variable.
+    // in this case, the result is just the original term
+    // casted back if needed
+    resultType = bvUF.getType();
+    result = castToType(intUF, resultType);
+  }
+  else
+  {
+    // bvUF is a function with arguments
+    // The arguments need to be casted as well.
+    TypeNode tn = bvUF.getType();
+    resultType = tn.getRangeType();
+    std::vector<TypeNode> bvDomain = tn.getArgTypes();
+    // children of the new symbolic application
+    std::vector<Node> achildren;
+    achildren.push_back(intUF);
+    int i = 0;
+    for (const TypeNode& d : bvDomain)
+    {
+      // Each bit-vector argument is casted to a natural number
+      // Other arguments are left intact.
+      Node fresh_bound_var = nm->mkBoundVar(d);
+      args.push_back(fresh_bound_var);
+      Node castedArg = args[i];
+      if (d.isBitVector())
+      {
+        castedArg = castToType(castedArg, nm->integerType());
+      }
+      achildren.push_back(castedArg);
+      i++;
+    }
+    Node app = nm->mkNode(kind::APPLY_UF, achildren);
+    Node body = castToType(app, resultType);
+    Node bvlist = d_nm->mkNode(kind::BOUND_VAR_LIST, args);
+    result = d_nm->mkNode(kind::LAMBDA, bvlist, body);
+  }
+  // If the result is BV, it needs to be casted back.
+  // add the function definition to the smt engine.
+  return result;
+}
 
 Node IntBlaster::translateFunctionSymbol(Node bvUF,
                                          std::map<Node, Node>& skolems)
@@ -214,7 +363,30 @@ Node IntBlaster::translateFunctionSymbol(Node bvUF,
 
 bool IntBlaster::childrenTypesChanged(Node n) { return true; }
 
-Node IntBlaster::castToType(Node n, TypeNode tn) { return Node(); }
+Node IntBlaster::castToType(Node n, TypeNode tn)
+{
+  // If there is no reason to cast, return the
+  // original node.
+  if (n.getType().isSubtypeOf(tn))
+  {
+    return n;
+  }
+  // We only case int to bv or vice verse.
+  Trace("int-blaster") << "castToType from " << n.getType() << " to " << tn
+                       << std::endl;
+  Assert((n.getType().isBitVector() && tn.isInteger())
+         || (n.getType().isInteger() && tn.isBitVector()));
+  if (n.getType().isInteger())
+  {
+    Assert(tn.isBitVector());
+    unsigned bvsize = tn.getBitVectorSize();
+    Node intToBVOp = d_nm->mkConst<IntToBitVector>(IntToBitVector(bvsize));
+    return d_nm->mkNode(intToBVOp, n);
+  }
+  Assert(n.getType().isBitVector());
+  Assert(tn.isInteger());
+  return d_nm->mkNode(kind::BITVECTOR_TO_NAT, n);
+}
 
 Node IntBlaster::reconstructNode(Node originalNode,
                                  TypeNode resultType,
