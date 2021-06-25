@@ -212,6 +212,7 @@ Node IntBlaster::translateNoChildren(Node original,
   Assert(original.isVar() || original.isConst());
   if (original.isVar())
   {
+    // if original is a variable, we distinguish cases according to it's type.
     if (original.getType().isBitVector())
     {
       // For bit-vector variables, we create fresh integer variables
@@ -251,7 +252,6 @@ Node IntBlaster::translateNoChildren(Node original,
                   + original.toString());
           uint64_t bvsize = original.getType().getBitVectorSize();
           addRangeConstraint(translation, bvsize, lemmas);
-          // put new definition of old variable in skolems
           bvCast = defineBVUFAsIntUF(original, translation);
         }
         else
@@ -262,7 +262,7 @@ Node IntBlaster::translateNoChildren(Node original,
           bvCast = original;
         }
 
-        // add bvCast to skolems if it is not already ther.
+        // add bvCast to skolems if it is not already there.
         if (skolems.find(original) == skolems.end())
         {
           skolems[original] = bvCast;
@@ -286,7 +286,7 @@ Node IntBlaster::translateNoChildren(Node original,
   }
   else
   {
-    // original is a const
+    // original is a constant value
     if (original.getKind() == kind::CONST_BITVECTOR)
     {
       // Bit-vector constants are transformed into their integer value.
@@ -333,7 +333,7 @@ Node IntBlaster::defineBVUFAsIntUF(Node bvUF, Node intUF)
     int i = 0;
     for (const TypeNode& d : bvDomain)
     {
-      // Each bit-vector argument is casted to a natural number
+      // Each bit-vector argument is casted to an integer.
       // Other arguments are left intact.
       Node fresh_bound_var = nm->mkBoundVar(d);
       args.push_back(fresh_bound_var);
@@ -350,16 +350,45 @@ Node IntBlaster::defineBVUFAsIntUF(Node bvUF, Node intUF)
     Node bvlist = d_nm->mkNode(kind::BOUND_VAR_LIST, args);
     result = d_nm->mkNode(kind::LAMBDA, bvlist, body);
   }
-  // If the result is BV, it needs to be casted back.
-  // add the function definition to the smt engine.
   return result;
 }
+
 
 Node IntBlaster::translateFunctionSymbol(Node bvUF,
                                          std::map<Node, Node>& skolems)
 {
-  return Node();
+  // construct the new function symbol.
+  Node intUF;
+  TypeNode tn = bvUF.getType();
+  TypeNode bvRange = tn.getRangeType();
+  // The function symbol has not been converted yet
+  std::vector<TypeNode> bvDomain = tn.getArgTypes();
+  std::vector<TypeNode> intDomain;
+  /**
+   * if the original range is a bit-vector sort,
+   * the new range should be an integer sort.
+   * Otherwise, we keep the original range.
+   * Similarly for the domains.
+   */
+  TypeNode intRange = bvRange.isBitVector() ? d_nm->integerType() : bvRange;
+  for (const TypeNode& d : bvDomain)
+  {
+    intDomain.push_back(d.isBitVector() ? d_nm->integerType() : d);
+  }
+  std::ostringstream os;
+  os << "__intblast_fun_" << bvUF << "_int";
+  SkolemManager* sm = d_nm->getSkolemManager();
+  intUF = sm->mkDummySkolem(
+      os.str(), d_nm->mkFunctionType(intDomain, intRange), "bv2int function");
+  // add definition of old function symbol to skolems
+  Node lambda = defineBVUFAsIntUF(bvUF, intUF);
+  if (skolems.find(bvUF) == skolems.end())
+  {
+    skolems[bvUF] = lambda;
+  }
+  return intUF;
 }
+
 
 bool IntBlaster::childrenTypesChanged(Node n) { return true; }
 
